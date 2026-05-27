@@ -316,12 +316,15 @@ if menu == "📊 Dashboard":
 
             if indicadores['Disponibilidad (%)'] < 85:
                 st.error("⚠️ Equipo crítico: baja disponibilidad operacional")
+                st.subheader(f"{indicadores['Disponibilidad (%)']} %")
 
             elif indicadores['Disponibilidad (%)'] < 95:
                 st.warning("⚠️ Disponibilidad aceptable pero mejorable")
+                st.subheader(f"{indicadores['Disponibilidad (%)']} %")
 
             else:
                 st.success("✅ Excelente disponibilidad")
+                st.subheader(f"{indicadores['Disponibilidad (%)']} %")
 
             if indicadores['MTBF (H)'] < 20:
                 st.warning("⚠️ Alta frecuencia de fallos. Se recomienda fortalecer mantenimiento preventivo.")
