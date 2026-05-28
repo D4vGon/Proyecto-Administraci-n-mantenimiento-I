@@ -625,15 +625,16 @@ elif menu == "🔍 Base de datos":
     with t_hist:
         st.subheader("Historial de Mantenimientos")
         df_trabajos_hist = pd.read_sql("SELECT * FROM trabajos", conn)
-        
-        # Inicialización de filtros fuera del condicional
-        filtro_eq = []
-        filtro_tipo = []
-        
+    
+        # Botón para resetear (opcional)
+        if st.button("🔄 Mostrar todos los registros"):
+            st.rerun()
+    
         if not df_trabajos_hist.empty:
             df_trabajos_hist['fecha_inicio'] = pd.to_datetime(df_trabajos_hist['fecha_inicio'], errors='coerce')
             df_trabajos_hist = df_trabajos_hist.dropna(subset=['fecha_inicio'])
     
+            # Filtros de equipo y tipo
             c_f1, c_f2 = st.columns(2)
             filtro_eq = c_f1.multiselect("Filtrar por Equipo", df_trabajos_hist['equipo_id'].unique())
             filtro_tipo = c_f2.multiselect("Filtrar por Tipo de Mantenimiento", df_trabajos_hist['tipo_mant'].unique())
@@ -643,17 +644,16 @@ elif menu == "🔍 Base de datos":
             if filtro_tipo:
                 df_trabajos_hist = df_trabajos_hist[df_trabajos_hist['tipo_mant'].isin(filtro_tipo)]
     
+            # Filtros de fecha opcionales
             c_f3, c_f4 = st.columns(2)
-            fecha_desde = c_f3.date_input("Fecha inicio filtro", value=datetime.now().date())
-            fecha_hasta = c_f4.date_input("Fecha final filtro", value=datetime.now().date())
+            fecha_desde = c_f3.date_input("Fecha inicio filtro (opcional)", value=None)
+            fecha_hasta = c_f4.date_input("Fecha final filtro (opcional)", value=None)
     
-            fecha_desde = pd.Timestamp(fecha_desde)
-            fecha_hasta = pd.Timestamp(fecha_hasta) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-    
-            df_trabajos_hist = df_trabajos_hist[
-                (df_trabajos_hist['fecha_inicio'] >= fecha_desde) &
-                (df_trabajos_hist['fecha_inicio'] <= fecha_hasta)
-            ]
+            if fecha_desde is not None:
+                df_trabajos_hist = df_trabajos_hist[df_trabajos_hist['fecha_inicio'] >= pd.Timestamp(fecha_desde)]
+            if fecha_hasta is not None:
+                fecha_hasta_ts = pd.Timestamp(fecha_hasta) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+                df_trabajos_hist = df_trabajos_hist[df_trabajos_hist['fecha_inicio'] <= fecha_hasta_ts]
     
         st.dataframe(df_trabajos_hist, use_container_width=True)
 
