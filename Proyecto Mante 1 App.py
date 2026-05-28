@@ -173,7 +173,7 @@ def calcular_indicadores(equipo_id=None):
     - Frecuencia de fallos = N° de fallas / días del periodo de análisis.
     - Costo total = suma de costo_repuestos/costos asociados registrados en trabajos.
 
-    Nota: el periodo de análisis se determina con la primera y la última fecha registradas para el equipo.
+    Nota: el periodo de análisis se determina con la primera y la última fecha registrada para el equipo.
     """
     conn = get_connection()
     query_trabajos = "SELECT * FROM trabajos"
@@ -190,14 +190,12 @@ def calcular_indicadores(equipo_id=None):
     if df_trabajos.empty and df_paros.empty:
         return (None, None, None)
 
-    # Conversión robusta de fechas
     if not df_trabajos.empty:
         df_trabajos['fecha_inicio'] = pd.to_datetime(df_trabajos['fecha_inicio'], errors='coerce')
         df_trabajos['fecha_fin'] = pd.to_datetime(df_trabajos['fecha_fin'], errors='coerce')
         df_trabajos = df_trabajos.dropna(subset=['fecha_inicio', 'fecha_fin'])
         df_trabajos = df_trabajos[df_trabajos['fecha_fin'] >= df_trabajos['fecha_inicio']].copy()
         if not df_trabajos.empty:
-            # Si existe tiempo_inter lo usa; si no, lo recalcula desde fechas.
             if 'tiempo_inter' in df_trabajos.columns:
                 df_trabajos['tiempo_inter'] = pd.to_numeric(df_trabajos['tiempo_inter'], errors='coerce')
             else:
@@ -205,6 +203,7 @@ def calcular_indicadores(equipo_id=None):
             duracion_calculada = (df_trabajos['fecha_fin'] - df_trabajos['fecha_inicio']).dt.total_seconds() / 3600
             df_trabajos['Horas'] = df_trabajos['tiempo_inter'].fillna(duracion_calculada)
             df_trabajos.loc[df_trabajos['Horas'] < 0, 'Horas'] = 0
+            df_trabajos['Horas'] = df_trabajos['Horas'].round(2)
 
     if not df_paros.empty:
         df_paros['inicio_paro'] = pd.to_datetime(df_paros['inicio_paro'], errors='coerce')
@@ -214,26 +213,20 @@ def calcular_indicadores(equipo_id=None):
         if not df_paros.empty:
             df_paros['t_paro'] = (df_paros['fin_paro'] - df_paros['inicio_paro']).dt.total_seconds() / 3600
             df_paros.loc[df_paros['t_paro'] < 0, 't_paro'] = 0
+            df_paros['t_paro'] = df_paros['t_paro'].round(2)
 
-    # Horas totales de paro
     total_paro = float(df_paros['t_paro'].sum()) if not df_paros.empty else 0.0
 
-    # Trabajos correctivos como base de reparación real para MTTR
     df_correctivos = pd.DataFrame()
     if not df_trabajos.empty and 'tipo_mant' in df_trabajos.columns:
         df_correctivos = df_trabajos[df_trabajos['tipo_mant'].astype(str).str.lower() == 'correctivo'].copy()
 
-    # Conteo de fallas: preferiblemente paros; si no se registraron paros, correctivos.
     num_fallas = int(len(df_paros)) if not df_paros.empty else int(len(df_correctivos))
-
-    # Horas de reparación: trabajos correctivos; si no existen, usa horas de paro como aproximación.
     horas_reparacion = float(df_correctivos['Horas'].sum()) if not df_correctivos.empty and 'Horas' in df_correctivos.columns else total_paro
 
-    # Si no hay paros pero sí correctivos, se asume que el tiempo correctivo fue tiempo de indisponibilidad.
     if total_paro == 0 and not df_correctivos.empty and 'Horas' in df_correctivos.columns:
         total_paro = float(df_correctivos['Horas'].sum())
 
-    # Definición automática del periodo de análisis desde todos los registros válidos.
     fechas_inicio = []
     fechas_fin = []
     if not df_paros.empty:
@@ -250,7 +243,6 @@ def calcular_indicadores(equipo_id=None):
     else:
         tiempo_total_estudio = 0
 
-    # Evitar divisiones por cero y periodos menores al tiempo de paro.
     tiempo_total_estudio = max(float(tiempo_total_estudio), float(total_paro), 1.0)
     horas_operativas = max(tiempo_total_estudio - total_paro, 0.0)
 
@@ -397,8 +389,14 @@ if menu == "📊 Dashboard":
             st.subheader("📊 Comparativa de Tiempos de Mantenimiento")
             
             if not df_trab.empty:
-                df_trab['Horas'] = (df_trab['fecha_fin'] - df_trab['fecha_inicio']).dt.total_seconds() / 3600
-                resumen_grafico = df_trab.groupby('tipo_mant')['Horas'].sum().reset_index()
+                # Mostrar horas reales, no valores en notación científica/nanométricos.
+                # La función calcular_indicadores ya devuelve la columna 'Horas' redondeada.
+                # Si no existe por alguna razón, se recalcula desde fecha_inicio y fecha_fin.
+                if 'Horas' not in df_trab.columns:
+                    df_trab['Horas'] = (df_trab['fecha_fin'] - df_trab['fecha_inicio']).dt.total_seconds() / 3600
+                df_trab['Horas'] = pd.to_numeric(df_trab['Horas'], errors='coerce').fillna(0).round(2)
+                resumen_grafico = df_trab.groupby('tipo_mant', as_index=False)['Horas'].sum()
+                resumen_grafico['Horas'] = resumen_grafico['Horas'].round(2)
                 
                 fig = px.bar(
                     resumen_grafico, 
@@ -408,9 +406,10 @@ if menu == "📊 Dashboard":
                     title=f"Horas Totales por Tipo de Mantenimiento ({eid})",
                     labels={'tipo_mant': 'Tipo', 'Horas': 'Horas Totales'},
                     color_discrete_map={'Preventivo': '#2E86C1', 'Correctivo': '#E74C3C', 'Predictivo': '#27AE60'},
-                    text_auto='.1f'
+                    text_auto='.2f'
                 )
-                fig.update_layout(plot_bgcolor="rgba(0,0,0,0)", showlegend=False)
+                fig.update_traces(hovertemplate='Tipo=%{x}<br>Horas Totales=%{y:.2f} h<extra></extra>')
+                fig.update_layout(plot_bgcolor="rgba(0,0,0,0)", showlegend=False, yaxis_tickformat='.2f')
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.info("No hay registros de trabajos de mantenimiento para generar el gráfico.")
@@ -482,13 +481,13 @@ elif menu == "🔧 Mantenimiento":
                 with col_f1:
                     fecha_ini = st.date_input("Fecha inicio", datetime.now().date())
                 with col_h1:
-                    hora_ini = st.time_input("Hora inicio", datetime.now().time())
+                    hora_ini = st.time_input("Hora inicio", datetime.now().time().replace(microsecond=0))
         
                 col_f2, col_h2 = st.columns(2)
                 with col_f2:
                     fecha_fin = st.date_input("Fecha fin", datetime.now().date())
                 with col_h2:
-                    hora_fin = st.time_input("Hora fin", datetime.now().time())
+                    hora_fin = st.time_input("Hora fin", datetime.now().time().replace(microsecond=0))
         
                 tini = datetime.combine(fecha_ini, hora_ini)
                 tfin = datetime.combine(fecha_fin, hora_fin)
@@ -498,7 +497,7 @@ elif menu == "🔧 Mantenimiento":
                     st.error("❌ La fecha/hora de fin no puede ser anterior a la de inicio.")
                 else:
                     diferencia = tfin - tini
-                    horas_duracion = diferencia.total_seconds() / 3600.0
+                    horas_duracion = round(diferencia.total_seconds() / 3600.0, 2)
                     
         
                 tdesc = st.text_area("Descripción de la tarea")
@@ -530,10 +529,10 @@ elif menu == "🔧 Mantenimiento":
                 col_p1, col_p2 = st.columns(2)
                 with col_p1:
                     fecha_ini_paro = st.date_input("Fecha inicio paro", datetime.now().date())
-                    hora_ini_paro = st.time_input("Hora inicio paro", datetime.now().time())
+                    hora_ini_paro = st.time_input("Hora inicio paro", datetime.now().time().replace(microsecond=0))
                 with col_p2:
                     fecha_fin_paro = st.date_input("Fecha fin paro", datetime.now().date())
-                    hora_fin_paro = st.time_input("Hora fin paro", datetime.now().time())
+                    hora_fin_paro = st.time_input("Hora fin paro", datetime.now().time().replace(microsecond=0))
                 
                 pini = datetime.combine(fecha_ini_paro, hora_ini_paro)
                 pfin = datetime.combine(fecha_fin_paro, hora_fin_paro)
@@ -546,7 +545,7 @@ elif menu == "🔧 Mantenimiento":
                     st.error("❌ La fecha/hora de fin no puede ser anterior a la de inicio.")
                 else:
                     diferencia_paro = pfin - pini
-                    horas_paro = diferencia_paro.total_seconds() / 3600.0
+                    horas_paro = round(diferencia_paro.total_seconds() / 3600.0, 2)
                     
                 
                 pcausa = st.text_input("Causa Raíz / Motivo")
@@ -667,6 +666,7 @@ elif menu == "🔍 Base de datos":
     with t_hist:
         st.subheader("Historial de Mantenimientos")
         df_trabajos_hist = pd.read_sql("SELECT * FROM trabajos", conn)
+        filtro_eq = []  # Valor por defecto para que la sección de paros funcione aunque no haya mantenimientos.
     
         # Botón para resetear (opcional)
         if st.button("🔄 Mostrar todos los registros"):
@@ -697,7 +697,14 @@ elif menu == "🔍 Base de datos":
                 fecha_hasta_ts = pd.Timestamp(fecha_hasta) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
                 df_trabajos_hist = df_trabajos_hist[df_trabajos_hist['fecha_inicio'] <= fecha_hasta_ts]
     
-        st.dataframe(df_trabajos_hist, use_container_width=True)
+        # Tabla de mantenimiento con fechas limpias: segundos a 2 dígitos y tiempo_inter a 2 decimales.
+        df_trabajos_hist_mostrar = df_trabajos_hist.copy()
+        for col_fecha in ['fecha_inicio', 'fecha_fin']:
+            if col_fecha in df_trabajos_hist_mostrar.columns:
+                df_trabajos_hist_mostrar[col_fecha] = pd.to_datetime(df_trabajos_hist_mostrar[col_fecha], errors='coerce').dt.strftime('%Y-%m-%d %H:%M:%S')
+        if 'tiempo_inter' in df_trabajos_hist_mostrar.columns:
+            df_trabajos_hist_mostrar['tiempo_inter'] = pd.to_numeric(df_trabajos_hist_mostrar['tiempo_inter'], errors='coerce').round(2)
+        st.dataframe(df_trabajos_hist_mostrar, use_container_width=True)
 
         st.subheader("Archivos Adjuntos")
         for _, row in df_trabajos_hist.iterrows():
@@ -720,7 +727,12 @@ elif menu == "🔍 Base de datos":
         if not df_paros_hist.empty and filtro_eq:
             df_paros_hist = df_paros_hist[df_paros_hist['equipo_id'].isin(filtro_eq)]
              
-        st.dataframe(df_paros_hist, use_container_width=True)
+        # Tabla de paros con fechas limpias: segundos a 2 dígitos.
+        df_paros_hist_mostrar = df_paros_hist.copy()
+        for col_fecha in ['inicio_paro', 'fin_paro']:
+            if col_fecha in df_paros_hist_mostrar.columns:
+                df_paros_hist_mostrar[col_fecha] = pd.to_datetime(df_paros_hist_mostrar[col_fecha], errors='coerce').dt.strftime('%Y-%m-%d %H:%M:%S')
+        st.dataframe(df_paros_hist_mostrar, use_container_width=True)
         
     with t_rept:
         st.dataframe(pd.read_sql("SELECT id, descripcion, stock, costo_unitario FROM repuestos", conn), use_container_width=True)
