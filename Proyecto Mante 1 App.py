@@ -646,7 +646,20 @@ elif menu == "🔍 Base de datos":
                 df_trabajos_hist = df_trabajos_hist[df_trabajos_hist['equipo_id'].isin(filtro_eq)]
             if filtro_tipo:
                 df_trabajos_hist = df_trabajos_hist[df_trabajos_hist['tipo_mant'].isin(filtro_tipo)]
-                
+
+            c_f3, c_f4 = st.columns(2)
+            fecha_inicio = c_f3.date_input("Fecha inicio filtro")
+            fecha_fin = c_f4.date_input("Fecha final filtro")
+
+            df_trabajos_hist['fecha_inicio'] = pd.to_datetime(
+                df_trabajos_hist['fecha_inicio']
+            )
+            
+            df_trabajos_hist = df_trabajos_hist[
+                (df_trabajos_hist['fecha_inicio'].dt.date >= fecha_inicio) &
+                (df_trabajos_hist['fecha_inicio'].dt.date <= fecha_fin)
+            ]
+        
         st.dataframe(df_trabajos_hist, use_container_width=True)
 
         st.subheader("Archivos Adjuntos")
