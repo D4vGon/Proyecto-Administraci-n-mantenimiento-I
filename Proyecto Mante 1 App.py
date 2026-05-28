@@ -161,13 +161,25 @@ def guardar_archivo(archivo_subido, prefijo=""):
 
 # --- LÓGICA DE CÁLCULO DE INDICADORES ---
 def calcular_indicadores(equipo_id=None):
-    conn = get_connection()
+    """
+    Calcula KPIs de mantenimiento por equipo o globales.
 
+    Fórmulas usadas:
+    - Horas de paro = suma(fin_paro - inicio_paro) en horas.
+    - N° de fallas = cantidad de paros registrados; si no hay paros, se usa la cantidad de trabajos Correctivos.
+    - MTTR = horas de reparación correctiva / N° de fallas. Si no hay trabajos correctivos, usa horas de paro.
+    - MTBF = horas operativas / N° de fallas = (horas del periodo de análisis - horas de paro) / N° de fallas.
+    - Disponibilidad operacional = horas operativas / horas del periodo de análisis * 100.
+    - Frecuencia de fallos = N° de fallas / días del periodo de análisis.
+    - Costo total = suma de costo_repuestos/costos asociados registrados en trabajos.
+
+    Nota: el periodo de análisis se determina con la primera y la última fecha registradas para el equipo.
+    """
+    conn = get_connection()
     query_trabajos = "SELECT * FROM trabajos"
     query_paros = "SELECT * FROM paros"
-    
+
     if equipo_id:
-        # Uso de parámetros para evitar inyección
         df_trabajos = pd.read_sql(query_trabajos + " WHERE equipo_id = ?", conn, params=(equipo_id,))
         df_paros = pd.read_sql(query_paros + " WHERE equipo_id = ?", conn, params=(equipo_id,))
     else:
@@ -178,46 +190,75 @@ def calcular_indicadores(equipo_id=None):
     if df_trabajos.empty and df_paros.empty:
         return (None, None, None)
 
-    # Conversión a datetime con errors='coerce' y eliminación de NaT
-    df_trabajos['fecha_inicio'] = pd.to_datetime(df_trabajos['fecha_inicio'], errors='coerce')
-    df_trabajos['fecha_fin'] = pd.to_datetime(df_trabajos['fecha_fin'], errors='coerce')
-    df_paros['inicio_paro'] = pd.to_datetime(df_paros['inicio_paro'], errors='coerce')
-    df_paros['fin_paro'] = pd.to_datetime(df_paros['fin_paro'], errors='coerce')
+    # Conversión robusta de fechas
+    if not df_trabajos.empty:
+        df_trabajos['fecha_inicio'] = pd.to_datetime(df_trabajos['fecha_inicio'], errors='coerce')
+        df_trabajos['fecha_fin'] = pd.to_datetime(df_trabajos['fecha_fin'], errors='coerce')
+        df_trabajos = df_trabajos.dropna(subset=['fecha_inicio', 'fecha_fin'])
+        df_trabajos = df_trabajos[df_trabajos['fecha_fin'] >= df_trabajos['fecha_inicio']].copy()
+        if not df_trabajos.empty:
+            # Si existe tiempo_inter lo usa; si no, lo recalcula desde fechas.
+            if 'tiempo_inter' in df_trabajos.columns:
+                df_trabajos['tiempo_inter'] = pd.to_numeric(df_trabajos['tiempo_inter'], errors='coerce')
+            else:
+                df_trabajos['tiempo_inter'] = pd.NA
+            duracion_calculada = (df_trabajos['fecha_fin'] - df_trabajos['fecha_inicio']).dt.total_seconds() / 3600
+            df_trabajos['Horas'] = df_trabajos['tiempo_inter'].fillna(duracion_calculada)
+            df_trabajos.loc[df_trabajos['Horas'] < 0, 'Horas'] = 0
 
-    # Eliminar filas con fechas nulas
-    df_trabajos = df_trabajos.dropna(subset=['fecha_inicio', 'fecha_fin'])
-    df_paros = df_paros.dropna(subset=['inicio_paro', 'fin_paro'])
-
-    # Tiempo Total de Paro (Horas)
-    total_paro = 0
-    num_fallas = 0
     if not df_paros.empty:
-        df_paros['t_paro'] = (df_paros['fin_paro'] - df_paros['inicio_paro']).dt.total_seconds() / 3600
-        total_paro = df_paros['t_paro'].sum()
-        num_fallas = len(df_paros)
+        df_paros['inicio_paro'] = pd.to_datetime(df_paros['inicio_paro'], errors='coerce')
+        df_paros['fin_paro'] = pd.to_datetime(df_paros['fin_paro'], errors='coerce')
+        df_paros = df_paros.dropna(subset=['inicio_paro', 'fin_paro'])
+        df_paros = df_paros[df_paros['fin_paro'] >= df_paros['inicio_paro']].copy()
+        if not df_paros.empty:
+            df_paros['t_paro'] = (df_paros['fin_paro'] - df_paros['inicio_paro']).dt.total_seconds() / 3600
+            df_paros.loc[df_paros['t_paro'] < 0, 't_paro'] = 0
 
-    # Ventana de tiempo real
-    if not df_paros.empty and not df_trabajos.empty:
-        inicio_estudio = min(df_paros['inicio_paro'].min(), df_trabajos['fecha_inicio'].min())
-        fin_estudio = max(df_paros['fin_paro'].max(), df_trabajos['fecha_fin'].max())
-    elif not df_paros.empty:
-        inicio_estudio = df_paros['inicio_paro'].min()
-        fin_estudio = df_paros['fin_paro'].max()
-    elif not df_trabajos.empty:
-        inicio_estudio = df_trabajos['fecha_inicio'].min()
-        fin_estudio = df_trabajos['fecha_fin'].max()
+    # Horas totales de paro
+    total_paro = float(df_paros['t_paro'].sum()) if not df_paros.empty else 0.0
+
+    # Trabajos correctivos como base de reparación real para MTTR
+    df_correctivos = pd.DataFrame()
+    if not df_trabajos.empty and 'tipo_mant' in df_trabajos.columns:
+        df_correctivos = df_trabajos[df_trabajos['tipo_mant'].astype(str).str.lower() == 'correctivo'].copy()
+
+    # Conteo de fallas: preferiblemente paros; si no se registraron paros, correctivos.
+    num_fallas = int(len(df_paros)) if not df_paros.empty else int(len(df_correctivos))
+
+    # Horas de reparación: trabajos correctivos; si no existen, usa horas de paro como aproximación.
+    horas_reparacion = float(df_correctivos['Horas'].sum()) if not df_correctivos.empty and 'Horas' in df_correctivos.columns else total_paro
+
+    # Si no hay paros pero sí correctivos, se asume que el tiempo correctivo fue tiempo de indisponibilidad.
+    if total_paro == 0 and not df_correctivos.empty and 'Horas' in df_correctivos.columns:
+        total_paro = float(df_correctivos['Horas'].sum())
+
+    # Definición automática del periodo de análisis desde todos los registros válidos.
+    fechas_inicio = []
+    fechas_fin = []
+    if not df_paros.empty:
+        fechas_inicio.append(df_paros['inicio_paro'].min())
+        fechas_fin.append(df_paros['fin_paro'].max())
+    if not df_trabajos.empty:
+        fechas_inicio.append(df_trabajos['fecha_inicio'].min())
+        fechas_fin.append(df_trabajos['fecha_fin'].max())
+
+    if fechas_inicio and fechas_fin:
+        inicio_estudio = min(fechas_inicio)
+        fin_estudio = max(fechas_fin)
+        tiempo_total_estudio = (fin_estudio - inicio_estudio).total_seconds() / 3600
     else:
-        inicio_estudio = fin_estudio = pd.Timestamp.now()
-    tiempo_total_estudio = (fin_estudio - inicio_estudio).total_seconds() / 3600
-    if tiempo_total_estudio == 0:
-        tiempo_total_estudio = 1  # evitar división por cero
+        tiempo_total_estudio = 0
 
-    # Cálculo de indicadores
-    mttr = total_paro / num_fallas if num_fallas > 0 else 0
-    mtbf = (tiempo_total_estudio - total_paro) / num_fallas if num_fallas > 0 else tiempo_total_estudio
-    disponibilidad = ((tiempo_total_estudio - total_paro) / tiempo_total_estudio) * 100
-    frecuencia_fallos = num_fallas / (tiempo_total_estudio / 24) if tiempo_total_estudio > 0 else 0
-    costo_total = df_trabajos['costo_repuestos'].sum() if not df_trabajos.empty else 0
+    # Evitar divisiones por cero y periodos menores al tiempo de paro.
+    tiempo_total_estudio = max(float(tiempo_total_estudio), float(total_paro), 1.0)
+    horas_operativas = max(tiempo_total_estudio - total_paro, 0.0)
+
+    mttr = horas_reparacion / num_fallas if num_fallas > 0 else 0.0
+    mtbf = horas_operativas / num_fallas if num_fallas > 0 else horas_operativas
+    disponibilidad = (horas_operativas / tiempo_total_estudio) * 100 if tiempo_total_estudio > 0 else 0.0
+    frecuencia_fallos = num_fallas / (tiempo_total_estudio / 24) if tiempo_total_estudio > 0 else 0.0
+    costo_total = float(pd.to_numeric(df_trabajos['costo_repuestos'], errors='coerce').fillna(0).sum()) if not df_trabajos.empty and 'costo_repuestos' in df_trabajos.columns else 0.0
 
     indicadores = {
         "MTBF (H)": round(mtbf, 2),
@@ -227,6 +268,7 @@ def calcular_indicadores(equipo_id=None):
         "Horas Paro": round(total_paro, 2),
         "Costo Total ($)": round(costo_total, 2)
     }
+
     return (indicadores, df_trabajos, df_paros)
 
 # --- INTERFAZ STREAMLIT ---
