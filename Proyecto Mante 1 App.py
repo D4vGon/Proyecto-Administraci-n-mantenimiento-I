@@ -616,78 +616,78 @@ elif menu == "🔍 Base de datos":
     with t_adm:
     st.subheader("Zona de Peligro")
 
-    col_activo, col_repuesto = st.columns(2)
-
-    # =========================
-    # BORRAR ACTIVOS
-    # =========================
-    with col_activo:
-        lista_borrar_equipo = pd.read_sql(
-            "SELECT id FROM activos", conn
-        )['id'].tolist()
-
-        if lista_borrar_equipo:
-            equipo_a_borrar = st.selectbox(
-                "Seleccione ID de equipo a eliminar",
-                lista_borrar_equipo,
-                key="sel_borrar_activo"
-            )
-
-            st.warning(
-                f"Borrar el activo {equipo_a_borrar} eliminará también todo su historial."
-            )
-
-            if st.button(
-                "Confirmar eliminación de activo",
-                key="btn_borrar_activo"
-            ):
-                cursor = conn.cursor()
-                cursor.execute(
-                    "DELETE FROM activos WHERE id = ?",
-                    (equipo_a_borrar,)
-                )
-                conn.commit()
-
-                st.success("Activo eliminado.")
-                st.rerun()
-
-    # =========================
-    # BORRAR REPUESTOS
-    # =========================
-    with col_repuesto:
-        lista_borrar_repuesto = pd.read_sql(
-            "SELECT id FROM repuestos", conn
-        )['id'].tolist()
-
-        if lista_borrar_repuesto:
-            repuesto_a_borrar = st.selectbox(
-                "Seleccione ID de repuesto a eliminar",
-                lista_borrar_repuesto,
-                key="sel_borrar_repuesto"
-            )
-
-            st.warning(
-                f"Borrar el repuesto {repuesto_a_borrar} eliminará su historial."
-            )
-
-            if st.button(
-                "Confirmar eliminación de repuesto",
-                key="btn_borrar_repuesto"
-            ):
-                cursor = conn.cursor()
-
-                cursor.execute(
-                    "DELETE FROM detalle_repuestos WHERE repuesto_id = ?",
-                    (repuesto_a_borrar,)
-                )
-
-                cursor.execute(
-                    "DELETE FROM repuestos WHERE id = ?",
-                    (repuesto_a_borrar,)
-                )
-
-                conn.commit()
-
-                st.success("Repuesto eliminado.")
-                st.rerun()
+            col_activo, col_repuesto = st.columns(2)
+        
+            # =========================
+            # BORRAR ACTIVOS
+            # =========================
+            with col_activo:
+                lista_borrar_equipo = pd.read_sql(
+                    "SELECT id FROM activos", conn
+                )['id'].tolist()
+        
+                if lista_borrar_equipo:
+                    equipo_a_borrar = st.selectbox(
+                        "Seleccione ID de equipo a eliminar",
+                        lista_borrar_equipo,
+                        key="sel_borrar_activo"
+                    )
+        
+                    st.warning(
+                        f"Borrar el activo {equipo_a_borrar} eliminará también todo su historial."
+                    )
+        
+                    if st.button(
+                        "Confirmar eliminación de activo",
+                        key="btn_borrar_activo"
+                    ):
+                        cursor = conn.cursor()
+                        cursor.execute(
+                            "DELETE FROM activos WHERE id = ?",
+                            (equipo_a_borrar,)
+                        )
+                        conn.commit()
+        
+                        st.success("Activo eliminado.")
+                        st.rerun()
+        
+            # =========================
+            # BORRAR REPUESTOS
+            # =========================
+            with col_repuesto:
+                lista_borrar_repuesto = pd.read_sql(
+                    "SELECT id FROM repuestos", conn
+                )['id'].tolist()
+        
+                if lista_borrar_repuesto:
+                    repuesto_a_borrar = st.selectbox(
+                        "Seleccione ID de repuesto a eliminar",
+                        lista_borrar_repuesto,
+                        key="sel_borrar_repuesto"
+                    )
+        
+                    st.warning(
+                        f"Borrar el repuesto {repuesto_a_borrar} eliminará su historial."
+                    )
+        
+                    if st.button(
+                        "Confirmar eliminación de repuesto",
+                        key="btn_borrar_repuesto"
+                    ):
+                        cursor = conn.cursor()
+        
+                        cursor.execute(
+                            "DELETE FROM detalle_repuestos WHERE repuesto_id = ?",
+                            (repuesto_a_borrar,)
+                        )
+        
+                        cursor.execute(
+                            "DELETE FROM repuestos WHERE id = ?",
+                            (repuesto_a_borrar,)
+                        )
+        
+                        conn.commit()
+        
+                        st.success("Repuesto eliminado.")
+                        st.rerun()
     conn.close()
