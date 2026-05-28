@@ -297,12 +297,44 @@ if menu == "📊 Dashboard":
             else:
                 st.error("🔴 Equipo Detenido (En Falla)")
                 
-        # 🌟 NUEVO: Carga de Manuales / Planos
+        # 🌟 DOCUMENTOS DEL ACTIVO
         with col_manual:
-            archivo_manual = st.file_uploader("Subir Manual/Plano (PDF)", type=['pdf', 'png', 'jpg'])
-            if archivo_manual:
-                guardar_archivo(archivo_manual, prefijo=f"MANUAL_{eid}")
-                st.toast("Manual guardado exitosamente.")
+            st.write("Documentación Técnica")
+        
+            archivos_equipo = []
+        
+            # Buscar archivos relacionados con el equipo
+            carpeta_uploads = "uploads"
+        
+            if os.path.exists(carpeta_uploads):
+        
+                for archivo in os.listdir(carpeta_uploads):
+        
+                    # Archivos OT del equipo
+                    if f"OT_{eid}" in archivo:
+                        archivos_equipo.append(archivo)
+        
+                    # Manuales del equipo
+                    elif f"MANUAL_{eid}" in archivo:
+                        archivos_equipo.append(archivo)
+        
+            if archivos_equipo:
+        
+                for archivo in archivos_equipo:
+        
+                    ruta_archivo = os.path.join(carpeta_uploads, archivo)
+        
+                    with open(ruta_archivo, "rb") as file:
+                        st.download_button(
+                            label=f"📄 {archivo}",
+                            data=file,
+                            file_name=archivo,
+                            mime="application/octet-stream",
+                            key=archivo
+                        )
+        
+            else:
+                st.info("No hay documentos asociados a este activo.")
 
         conn.close()
         st.markdown("---")
@@ -386,13 +418,26 @@ elif menu == "📋 Registro Activos":
         nombre = c2.text_input("Nombre del Equipo", placeholder="Ej: Bomba de Agua Principal")
         area = c1.text_input("Área o Proceso")
         estado = c2.selectbox("Estado Inicial", ["Activo", "Fuera de servicio"])
-        
+        manual_equipo = st.file_uploader(
+            "Manual / Plano del equipo",
+            type=['pdf', 'png', 'jpg']
+        )
+
+        # ==========================================
+        # BOTÓN GUARDAR
+        # ==========================================
         if st.form_submit_button("✅ Guardar Activo"):
             if aid and nombre:
                 conn = get_connection()
                 try:
                     conn.execute("INSERT INTO activos VALUES (?,?,?,?,?)", (aid, nombre, area, tipo, estado))
                     conn.commit()
+                    # 🌟 GUARDAR ARCHIVO DEL MANUAL
+                    if manual_equipo:
+                        guardar_archivo(
+                            manual_equipo,
+                            prefijo=f"MANUAL_{aid}"
+                        )
                     st.success(f"Equipo {nombre} ({aid}) registrado correctamente.")
                     st.balloons()
                 except sqlite3.Error:
