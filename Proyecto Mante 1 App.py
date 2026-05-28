@@ -56,17 +56,6 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 
-conn = get_connection()
-cursor = conn.cursor()
-cursor.execute("SELECT id, fecha_inicio, fecha_fin FROM trabajos")
-rows = cursor.fetchall()
-for row in rows:
-    id_t, f_ini, f_fin = row
-    if f_ini and f_fin:
-        duracion = (pd.to_datetime(f_fin) - pd.to_datetime(f_ini)).total_seconds() / 3600
-        cursor.execute("UPDATE trabajos SET tiempo_inter = ? WHERE id = ?", (duracion, id_t))
-conn.commit()
-conn.close()
 # --- FUNCIONES DE BASE DE DATOS ---
 def get_connection():
     """Establece la conexión y activa explícitamente las claves foráneas."""
