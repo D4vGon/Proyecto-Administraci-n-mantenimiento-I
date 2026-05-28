@@ -613,6 +613,7 @@ elif menu == "🔍 Base de datos":
         
     with t_rept:
         st.dataframe(pd.read_sql("SELECT id, descripcion, stock, costo_unitario FROM repuestos", conn),use_container_width=True)
+    
     with t_adm:
     st.subheader("Zona de Peligro")
 
