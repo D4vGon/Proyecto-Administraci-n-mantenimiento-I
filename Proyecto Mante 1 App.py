@@ -613,13 +613,13 @@ elif menu == "🔍 Base de datos":
                 st.rerun()
 
         lista_borrar_repuesto = pd.read_sql("SELECT id FROM repuestos", conn)['id'].tolist()
-            if lista_borrar_repuesto:
-                repuesto_a_borrar = st.selectbox("Seleccione ID de repuesto a eliminar", lista_borrar_repuesto)
-                st.warning(f"Borrar el repuesto {repuesto_a_borrar} eliminará también todo su historial de paros y trabajos.")
-                if st.button("Confirmar Eliminación"):
-                    cursor = conn.cursor()
-                    cursor.execute("DELETE FROM repuestos WHERE id = ?", (repuesto_a_borrar,))
-                    conn.commit()
-                    st.success("Repuesto eliminado.")
-                    st.rerun()
+        if lista_borrar_repuesto:
+            repuesto_a_borrar = st.selectbox("Seleccione ID de repuesto a eliminar", lista_borrar_repuesto)
+            st.warning(f"Borrar el repuesto {repuesto_a_borrar} eliminará también todo su historial de paros y trabajos.")
+            if st.button("Confirmar Eliminación"):
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM repuestos WHERE id = ?", (repuesto_a_borrar,))
+                conn.commit()
+                st.success("Repuesto eliminado.")
+                st.rerun()
     conn.close()
