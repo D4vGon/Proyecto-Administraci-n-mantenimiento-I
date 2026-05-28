@@ -475,10 +475,22 @@ elif menu == "🔧 Mantenimiento":
                 tequipo = st.selectbox("Equipo", lista_opciones).split(" - ")[0]
                 ttipo = st.selectbox("Tipo Mantenimiento", ["Preventivo", "Correctivo", "Predictivo"])
                 
-                c_t1, c_t2 = st.columns(2)
-                from datetime import timedelta
-                tini = c_t1.datetime_input("Inicio Intervención", datetime.now())
-                tfin = c_t2.datetime_input("Fin Intervención", datetime.now() + timedelta(hours=1))
+                col_fecha1, col_hora1 = st.columns(2)
+                with col_fecha1:
+                    fecha_ini = st.date_input("Fecha inicio", datetime.now().date())
+                with col_hora1:
+                    hora_ini = st.time_input("Hora inicio", datetime.now().time())
+                
+                col_fecha2, col_hora2 = st.columns(2)
+                with col_fecha2:
+                    fecha_fin = st.date_input("Fecha fin", datetime.now().date())
+                with col_hora2:
+                    hora_fin = st.time_input("Hora fin", datetime.now().time())
+                
+                # Combinar fecha y hora en objetos datetime
+                from datetime import datetime, time
+                tini = datetime.combine(fecha_ini, hora_ini)
+                tfin = datetime.combine(fecha_fin, hora_fin)
                 
                 tdesc = st.text_area("Descripción de la tarea")
                 c_t3, c_t4 = st.columns(2)
@@ -494,9 +506,7 @@ elif menu == "🔧 Mantenimiento":
                 else:
                     diferencia_int = tfin - tini
                     st.write(f"La duración total de intervención es: {diferencia_int}")
-                
-                tint = str(diferencia_int) if diferencia_int else None
-                    
+                                    
 
                 if st.form_submit_button("Registrar Mantenimiento"):
                     nombre_archivo = guardar_archivo(archivo_reporte, prefijo=f"OT_{tequipo}")
