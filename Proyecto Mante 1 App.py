@@ -125,7 +125,7 @@ def init_db():
     
     # NUEVO
     try:
-        conn.execute("ALTER TABLE trabajos ADD COLUMN tiempo_inter TEXT")
+        conn.execute("ALTER TABLE trabajos ADD COLUMN tiempo_inter REAL")
     except:
         pass
 
@@ -472,47 +472,58 @@ elif menu == "🔧 Mantenimiento":
     else:
         with tab1:
             with st.form("form_trabajo"):
+                # 1. Selección del equipo
                 tequipo = st.selectbox("Equipo", lista_opciones).split(" - ")[0]
+        
+                # 2. Tipo de mantenimiento
                 ttipo = st.selectbox("Tipo Mantenimiento", ["Preventivo", "Correctivo", "Predictivo"])
-                
-                col_fecha1, col_hora1 = st.columns(2)
-                with col_fecha1:
+        
+                # 3. Fecha y hora de inicio (con valores por defecto actuales)
+                col_f1, col_h1 = st.columns(2)
+                with col_f1:
                     fecha_ini = st.date_input("Fecha inicio", datetime.now().date())
-                with col_hora1:
+                with col_h1:
                     hora_ini = st.time_input("Hora inicio", datetime.now().time())
-                
-                col_fecha2, col_hora2 = st.columns(2)
-                with col_fecha2:
+        
+                # 4. Fecha y hora de fin (mismos valores por defecto, pero el usuario los modificará)
+                col_f2, col_h2 = st.columns(2)
+                with col_f2:
                     fecha_fin = st.date_input("Fecha fin", datetime.now().date())
-                with col_hora2:
+                with col_h2:
                     hora_fin = st.time_input("Hora fin", datetime.now().time())
-                
-                # Combinar fecha y hora en objetos datetime
-                from datetime import datetime, time
+        
+                # Combinar en objetos datetime
                 tini = datetime.combine(fecha_ini, hora_ini)
                 tfin = datetime.combine(fecha_fin, hora_fin)
-                
-                tdesc = st.text_area("Descripción de la tarea")
-                c_t3, c_t4 = st.columns(2)
-                tpers = c_t3.text_input("Técnico Responsable")
-                tcosto = c_t4.number_input("Costo Mantenimiento ($)", min_value=0.0)
-                
-                # 🌟 NUEVO: Carga de archivo de reporte de intervención
-                archivo_reporte = st.file_uploader("Adjuntar Reporte / Orden de Trabajo (Opcional)", type=['pdf', 'docx', 'jpg'])
-                
+        
+                # Validación
                 if tfin < tini:
-                    st.error("¡Error! La fecha de fin no puede ser anterior a la de inicio.")
-                    diferencia_int = None
+                    st.error("❌ La fecha/hora de fin no puede ser anterior a la de inicio.")
+                    diferencia = None
                 else:
-                    diferencia_int = tfin - tini
-                    st.write(f"La duración total de intervención es: {diferencia_int}")
-                                    
-
+                    diferencia = tfin - tini
+                    horas_duracion = diferencia.total_seconds() / 3600.0
+                    st.success(f"✅ Duración de la intervención: {horas_duracion:.2f} horas")
+        
+                # Resto de campos
+                tdesc = st.text_area("Descripción de la tarea")
+                col_t3, col_t4 = st.columns(2)
+                tpers = col_t3.text_input("Técnico Responsable")
+                tcosto = col_t4.number_input("Costo Mantenimiento ($)", min_value=0.0, value=0.0)
+        
+                # Archivo adjunto
+                archivo_reporte = st.file_uploader("Adjuntar Reporte / Orden de Trabajo (Opcional)", type=['pdf', 'docx', 'jpg'])
+        
                 if st.form_submit_button("Registrar Mantenimiento"):
                     nombre_archivo = guardar_archivo(archivo_reporte, prefijo=f"OT_{tequipo}")
                     conn = get_connection()
-                    conn.execute("INSERT INTO trabajos (equipo_id, tipo_mant, fecha_inicio, fecha_fin, descripcion, personal, costo_repuestos, tiempo_inter, archivo_adjunto) VALUES (?,?,?,?,?,?,?,?,?)",
-                                    (tequipo, ttipo, tini, tfin, tdesc, tpers, tcosto, tint, nombre_archivo))
+                    # Guardamos la duración en horas (como número real) en la columna tiempo_inter
+                    # Nota: la columna tiempo_inter debe ser REAL (o FLOAT). Si es TEXT, conviértela.
+                    conn.execute("""
+                        INSERT INTO trabajos 
+                        (equipo_id, tipo_mant, fecha_inicio, fecha_fin, descripcion, personal, costo_repuestos, tiempo_inter, archivo_adjunto)
+                        VALUES (?,?,?,?,?,?,?,?,?)
+                    """, (tequipo, ttipo, tini, tfin, tdesc, tpers, tcosto, horas_duracion if diferencia else None, nombre_archivo))
                     conn.commit()
                     conn.close()
                     st.success("Orden de trabajo guardada exitosamente.")
