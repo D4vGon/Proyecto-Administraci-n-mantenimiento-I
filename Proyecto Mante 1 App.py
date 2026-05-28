@@ -479,8 +479,8 @@ elif menu == "🔧 Mantenimiento":
                         conn.commit()
                         conn.close()
                         st.success("Orden de trabajo guardada exitosamente.")
+                        st.balloons()
         with tab2:
-            # Separación de fecha y hora también para paros (evita errores de hora no modificada)
             with st.form("form_paro"):
                 pequipo_full = st.selectbox("Equipo en Paro", lista_opciones)
                 pequipo = pequipo_full.split(" - ")[0]
@@ -496,25 +496,32 @@ elif menu == "🔧 Mantenimiento":
                 pini = datetime.combine(fecha_ini_paro, hora_ini_paro)
                 pfin = datetime.combine(fecha_fin_paro, hora_fin_paro)
                 
+                # Inicializar variable para evitar NameError
+                diferencia_paro = None
+                horas_paro = None
+                
                 if pfin < pini:
-                    st.error("¡Error! La fecha/hora de fin no puede ser anterior a la de inicio.")
-                    diferencia_paro = None
+                    st.error("❌ La fecha/hora de fin no puede ser anterior a la de inicio.")
                 else:
                     diferencia_paro = pfin - pini
-                    st.write(f"La duración total del paro es: {diferencia_paro}")
+                    horas_paro = diferencia_paro.total_seconds() / 3600.0
+                    st.success(f"✅ Duración del paro: {horas_paro:.2f} horas")
                 
                 pcausa = st.text_input("Causa Raíz / Motivo")
                 
                 if st.form_submit_button("Reportar Paro"):
-                    if pfin >= pini:
+                    if pfin < pini:
+                        st.error("No se puede registrar: la fecha de fin es anterior a la de inicio.")
+                    else:
                         conn = get_connection()
-                        conn.execute("INSERT INTO paros (equipo_id, inicio_paro, fin_paro, causa) VALUES (?,?,?,?)",
-                                    (pequipo, pini, pfin, pcausa))
+                        conn.execute(
+                            "INSERT INTO paros (equipo_id, inicio_paro, fin_paro, causa) VALUES (?,?,?,?)",
+                            (pequipo, pini, pfin, pcausa)
+                        )
                         conn.commit()
                         conn.close()
-                        st.warning(f"Paro registrado para el equipo {pequipo}.")
-                    else:
-                        st.error("No se puede registrar el paro porque la fecha de fin es anterior al inicio.")
+                        st.success(f"✅ Paro registrado para el equipo {pequipo}. Duración: {horas_paro:.2f} horas")
+                        st.balloons()
 
 # =========================================================
 # REPUESTOS
@@ -541,6 +548,7 @@ elif menu == "📦 Repuestos":
                                  (rid, n_parte, desc, stock, costo))
                     conn.commit()
                     st.success("Repuesto guardado en el inventario.")
+                    st.balloons()
                 except sqlite3.Error as e:
                     st.error(f"Error al guardar: {e}")
                 finally:
@@ -586,6 +594,7 @@ elif menu == "📦 Repuestos":
                                    (costo_total_calculado, trabajo_id))
                     conn.commit()
                     st.success("Inventario actualizado y costo asignado a la orden de trabajo exitosamente.")
+                    st.balloons()
                     
         st.subheader("Historial de Consumo de Repuestos")
         try:
@@ -688,6 +697,7 @@ elif menu == "🔍 Base de datos":
                     cursor.execute("DELETE FROM activos WHERE id = ?", (equipo_a_borrar,))
                     conn.commit()
                     st.success("Activo eliminado.")
+                    st.balloons()
                     st.rerun()
     
         with col_repuesto:
@@ -701,5 +711,6 @@ elif menu == "🔍 Base de datos":
                     cursor.execute("DELETE FROM repuestos WHERE id = ?", (repuesto_a_borrar,))
                     conn.commit()
                     st.success("Repuesto eliminado.")
+                    st.balloons()
                     st.rerun()
     conn.close()
