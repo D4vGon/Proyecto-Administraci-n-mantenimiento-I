@@ -489,11 +489,12 @@ elif menu == "🔧 Mantenimiento":
                 
                 if tfin < tini:
                     st.error("¡Error! La fecha de fin no puede ser anterior a la de inicio.")
+                    diferencia_int = None
                 else:
                     diferencia_int = tfin - tini
-                    # Mostrar el resultado directo (formato: 0:00:00)
-                    tint = str(diferencia_int)
                     st.write(f"La duración total de intervención es: {diferencia_int}")
+                
+                tint = str(diferencia_int) if diferencia_int else None
                     
 
                 if st.form_submit_button("Registrar Mantenimiento"):
@@ -515,11 +516,12 @@ elif menu == "🔧 Mantenimiento":
                 
                 if pfin < pini:
                     st.error("¡Error! La fecha de fin no puede ser anterior a la de inicio.")
+                    diferencia_paro = None
                 else:
                     diferencia_paro = pfin - pini
-                # Mostrar el resultado directo (formato: 0:00:00)
-                pint = str(diferencia_paro)
-                st.write(f"La duración total del paro es: {diferencia_paro}")
+                    st.write(f"La duración total del paro es: {diferencia_paro}")
+                
+                pint = str(diferencia_paro) if diferencia_paro else None
 
                 
                 pcausa = st.text_input("Causa Raíz / Motivo")
@@ -625,7 +627,7 @@ elif menu == "📦 Repuestos":
 # =========================================================
 elif menu == "🔍 Base de datos":
     st.header("Historial y Gestión de Datos")
-    t_act, t_hist, t_rept, t_adm = st.tabs(["Lista de Activos", "Historial Completo", "Respuestos", "⚙️ Administración"])
+    t_act, t_hist, t_rept, t_adm = st.tabs(["Lista de Activos", "Historial Completo", "Repuestos", "⚙️ Administración"])
     
     conn = get_connection()
     with t_act:
@@ -646,6 +648,26 @@ elif menu == "🔍 Base de datos":
                 df_trabajos_hist = df_trabajos_hist[df_trabajos_hist['tipo_mant'].isin(filtro_tipo)]
                 
         st.dataframe(df_trabajos_hist, use_container_width=True)
+
+            st.subheader("Archivos Adjuntos")
+
+            for _, row in df_trabajos_hist.iterrows():
+        
+                archivo = row.get("archivo_adjunto")
+        
+                if archivo:
+        
+                    ruta = os.path.join("uploads", archivo)
+        
+                    if os.path.exists(ruta):
+        
+                        with open(ruta, "rb") as f:
+                            st.download_button(
+                                label=f"📄 OT #{row['id']} - {archivo}",
+                                data=f,
+                                file_name=archivo,
+                                key=f"hist_{row['id']}"
+                            )
         
         st.subheader("Historial de Paros")
         df_paros_hist = pd.read_sql("SELECT * FROM paros", conn)
