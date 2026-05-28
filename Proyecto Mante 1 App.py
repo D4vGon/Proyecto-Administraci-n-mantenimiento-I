@@ -615,7 +615,7 @@ elif menu == "🔍 Base de datos":
         st.dataframe(pd.read_sql("SELECT id, descripcion, stock, costo_unitario FROM repuestos", conn),use_container_width=True)
     
     with t_adm:
-    st.subheader("Zona de Peligro")
+        st.subheader("Zona de Peligro")
 
             col_activo, col_repuesto = st.columns(2)
         
