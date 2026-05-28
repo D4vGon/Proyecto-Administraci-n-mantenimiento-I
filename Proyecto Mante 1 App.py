@@ -476,8 +476,9 @@ elif menu == "🔧 Mantenimiento":
                 ttipo = st.selectbox("Tipo Mantenimiento", ["Preventivo", "Correctivo", "Predictivo"])
                 
                 c_t1, c_t2 = st.columns(2)
+                from datetime import timedelta
                 tini = c_t1.datetime_input("Inicio Intervención", datetime.now())
-                tfin = c_t2.datetime_input("Fin Intervención", datetime.now())
+                tfin = c_t2.datetime_input("Fin Intervención", datetime.now() + timedelta(hours=1))
                 
                 tdesc = st.text_area("Descripción de la tarea")
                 c_t3, c_t4 = st.columns(2)
