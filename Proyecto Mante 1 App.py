@@ -110,13 +110,24 @@ def init_db():
                         cantidad INTEGER,
                         costo_total REAL,
                         FOREIGN KEY(trabajo_id) REFERENCES trabajos(id) ON DELETE CASCADE,
-                        FOREIGN KEY(repuesto_id) REFERENCES repuestos(id))''')
+                        FOREIGN KEY(repuesto_id) REFERENCES repuestos(id) ON DELETE CASCADE)''')
     
     # Migraciones (por si ya tenías la BD creada antes y necesitas las nuevas columnas)
-    try: conn.execute("ALTER TABLE repuestos ADD COLUMN numero_parte TEXT")
-    except: pass
-    try: conn.execute("ALTER TABLE trabajos ADD COLUMN archivo_adjunto TEXT")
-    except: pass
+    try: 
+        conn.execute("ALTER TABLE repuestos ADD COLUMN numero_parte TEXT")
+    except:
+        pass
+
+    try:
+        conn.execute("ALTER TABLE trabajos ADD COLUMN archivo_adjunto TEXT")
+    except:
+        pass
+    
+    # NUEVO
+    try:
+        conn.execute("ALTER TABLE trabajos ADD COLUMN tiempo_inter TEXT")
+    except:
+        pass
 
     conn.commit()
     conn.close()
@@ -436,7 +447,9 @@ elif menu == "🔧 Mantenimiento":
                 else:
                     diferencia_int = tfin - tini
                     # Mostrar el resultado directo (formato: 0:00:00)
-                    tint = st.write(f"La duración total de intervención es: {diferencia_int}")
+                    tint = str(diferencia_int)
+                    st.write(f"La duración total de intervención es: {diferencia_int}")
+                    
 
                 if st.form_submit_button("Registrar Mantenimiento"):
                     nombre_archivo = guardar_archivo(archivo_reporte, prefijo=f"OT_{tequipo}")
@@ -460,7 +473,8 @@ elif menu == "🔧 Mantenimiento":
                 else:
                     diferencia_paro = pfin - pini
                 # Mostrar el resultado directo (formato: 0:00:00)
-                pint = st.write(f"La duración total del paro es: {diferencia_paro}")
+                pint = str(diferencia_paro)
+                st.write(f"La duración total del paro es: {diferencia_paro}")
 
                 
                 pcausa = st.text_input("Causa Raíz / Motivo")
@@ -600,24 +614,40 @@ elif menu == "🔍 Base de datos":
     with t_rept:
         st.dataframe(pd.read_sql("SELECT id, descripcion, stock, costo_unitario FROM repuestos", conn),use_container_width=True)
     with t_adm:
-        st.subheader("Zona de Peligro")
+    st.subheader("Zona de Peligro")
+
+    col_activo, col_repuesto = st.columns(2)
+
+    with col_activo:
         lista_borrar_equipo = pd.read_sql("SELECT id FROM activos", conn)['id'].tolist()
         if lista_borrar_equipo:
-            equipo_a_borrar = st.selectbox("Seleccione ID de equipo a eliminar", lista_borrar_equipo)
+            equipo_a_borrar = st.selectbox(
+                "Seleccione ID de equipo a eliminar",
+                lista_borrar_equipo,
+                key="sel_borrar_activo"
+            )
             st.warning(f"Borrar el activo {equipo_a_borrar} eliminará también todo su historial de paros y trabajos.")
-            if st.button("Confirmar Eliminación"):
+            if st.button("Confirmar eliminación de activo", key="btn_borrar_activo"):
                 cursor = conn.cursor()
                 cursor.execute("DELETE FROM activos WHERE id = ?", (equipo_a_borrar,))
                 conn.commit()
                 st.success("Activo eliminado.")
                 st.rerun()
 
+    with col_repuesto:
         lista_borrar_repuesto = pd.read_sql("SELECT id FROM repuestos", conn)['id'].tolist()
         if lista_borrar_repuesto:
-            repuesto_a_borrar = st.selectbox("Seleccione ID de repuesto a eliminar", lista_borrar_repuesto)
-            st.warning(f"Borrar el repuesto {repuesto_a_borrar} eliminará también todo su historial de paros y trabajos.")
-            if st.button("Confirmar Eliminación"):
+            repuesto_a_borrar = st.selectbox(
+                "Seleccione ID de repuesto a eliminar",
+                lista_borrar_repuesto,
+                key="sel_borrar_repuesto"
+            )
+            st.warning(
+                f"Borrar el repuesto {repuesto_a_borrar} eliminará su historial de uso en detalle_repuestos."
+            )
+            if st.button("Confirmar eliminación de repuesto", key="btn_borrar_repuesto"):
                 cursor = conn.cursor()
+                cursor.execute("DELETE FROM detalle_repuestos WHERE repuesto_id = ?", (repuesto_a_borrar,))
                 cursor.execute("DELETE FROM repuestos WHERE id = ?", (repuesto_a_borrar,))
                 conn.commit()
                 st.success("Repuesto eliminado.")
