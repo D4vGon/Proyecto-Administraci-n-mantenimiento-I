@@ -55,6 +55,18 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+
+conn = get_connection()
+cursor = conn.cursor()
+cursor.execute("SELECT id, fecha_inicio, fecha_fin FROM trabajos")
+rows = cursor.fetchall()
+for row in rows:
+    id_t, f_ini, f_fin = row
+    if f_ini and f_fin:
+        duracion = (pd.to_datetime(f_fin) - pd.to_datetime(f_ini)).total_seconds() / 3600
+        cursor.execute("UPDATE trabajos SET tiempo_inter = ? WHERE id = ?", (duracion, id_t))
+conn.commit()
+conn.close()
 # --- FUNCIONES DE BASE DE DATOS ---
 def get_connection():
     """Establece la conexión y activa explícitamente las claves foráneas."""
@@ -356,7 +368,10 @@ if menu == "📊 Dashboard":
             
             if not df_trab.empty:
                 df_trab['Horas'] = (df_trab['fecha_fin'] - df_trab['fecha_inicio']).dt.total_seconds() / 3600
-                resumen_grafico = df_trab.groupby('tipo_mant')['Horas'].sum().reset_index()
+                # Eliminar duraciones ridículas (menos de 0.01 horas = 36 segundos)
+                df_trab = df_trab[df_trab['Horas'] >= 0.01]
+                if not df_trab.empty:
+                    resumen_grafico = df_trab.groupby('tipo_mant')['Horas'].sum().reset_index()
                 
                 fig = px.bar(
                     resumen_grafico, 
@@ -366,7 +381,7 @@ if menu == "📊 Dashboard":
                     title=f"Horas Totales por Tipo de Mantenimiento ({eid})",
                     labels={'tipo_mant': 'Tipo', 'Horas': 'Horas Totales'},
                     color_discrete_map={'Preventivo': '#2E86C1', 'Correctivo': '#E74C3C', 'Predictivo': '#27AE60'},
-                    text_auto='.1f'
+                    text_auto='.2f'
                 )
                 fig.update_layout(plot_bgcolor="rgba(0,0,0,0)", showlegend=False)
                 st.plotly_chart(fig, use_container_width=True)
@@ -631,7 +646,8 @@ elif menu == "🔍 Base de datos":
             st.rerun()
     
         if not df_trabajos_hist.empty:
-            df_trabajos_hist['fecha_inicio'] = pd.to_datetime(df_trabajos_hist['fecha_inicio'], errors='coerce')
+            df_trabajos_hist['fecha_inicio'] = pd.to_datetime(df_trabajos_hist['fecha_inicio']).dt.strftime('%Y-%m-%d %H:%M:%S')
+            df_trabajos_hist['fecha_fin'] = pd.to_datetime(df_trabajos_hist['fecha_fin']).dt.strftime('%Y-%m-%d %H:%M:%S')
             df_trabajos_hist = df_trabajos_hist.dropna(subset=['fecha_inicio'])
     
             # Filtros de equipo y tipo
@@ -654,7 +670,10 @@ elif menu == "🔍 Base de datos":
             if fecha_hasta is not None:
                 fecha_hasta_ts = pd.Timestamp(fecha_hasta) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
                 df_trabajos_hist = df_trabajos_hist[df_trabajos_hist['fecha_inicio'] <= fecha_hasta_ts]
-    
+
+            if 'tiempo_inter' in df_trabajos_hist.columns:
+                df_trabajos_hist['tiempo_inter'] = df_trabajos_hist['tiempo_inter'].apply(lambda x: round(x, 2) if pd.notnull(x) else x)
+        
         st.dataframe(df_trabajos_hist, use_container_width=True)
 
         st.subheader("Archivos Adjuntos")
@@ -677,6 +696,8 @@ elif menu == "🔍 Base de datos":
         
         if not df_paros_hist.empty and filtro_eq:
             df_paros_hist = df_paros_hist[df_paros_hist['equipo_id'].isin(filtro_eq)]
+            df_paros_hist['inicio_paro'] = pd.to_datetime(df_paros_hist['inicio_paro']).dt.strftime('%Y-%m-%d %H:%M:%S')
+            df_paros_hist['fin_paro'] = pd.to_datetime(df_paros_hist['fin_paro']).dt.strftime('%Y-%m-%d %H:%M:%S')
              
         st.dataframe(df_paros_hist, use_container_width=True)
         
