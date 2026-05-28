@@ -649,7 +649,7 @@ elif menu == "🔍 Base de datos":
                 
         st.dataframe(df_trabajos_hist, use_container_width=True)
 
-            st.subheader("Archivos Adjuntos")
+        st.subheader("Archivos Adjuntos")
 
             for _, row in df_trabajos_hist.iterrows():
         
