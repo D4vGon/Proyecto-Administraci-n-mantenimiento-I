@@ -457,7 +457,7 @@ elif menu == "🔧 Mantenimiento":
                 else:
                     diferencia = tfin - tini
                     horas_duracion = diferencia.total_seconds() / 3600.0
-                    st.success(f"✅ Duración de la intervención: {horas_duracion:.2f} horas")
+                    
         
                 tdesc = st.text_area("Descripción de la tarea")
                 col_t3, col_t4 = st.columns(2)
@@ -505,7 +505,7 @@ elif menu == "🔧 Mantenimiento":
                 else:
                     diferencia_paro = pfin - pini
                     horas_paro = diferencia_paro.total_seconds() / 3600.0
-                    st.success(f"✅ Duración del paro: {horas_paro:.2f} horas")
+                    
                 
                 pcausa = st.text_input("Causa Raíz / Motivo")
                 
@@ -520,7 +520,7 @@ elif menu == "🔧 Mantenimiento":
                         )
                         conn.commit()
                         conn.close()
-                        st.success(f"✅ Paro registrado para el equipo {pequipo}. Duración: {horas_paro:.2f} horas")
+                        st.success(f"✅ Paro registrado para el equipo {pequipo}.")
                         st.balloons()
 
 # =========================================================
