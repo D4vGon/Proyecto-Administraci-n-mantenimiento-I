@@ -83,7 +83,7 @@ def init_db():
                         fecha_fin TIMESTAMP,
                         descripcion TEXT,
                         personal TEXT,
-                        costo_repuestos REAL,
+                        costo_repuestos REAL DEFAULT 0,
                         FOREIGN KEY(equipo_id) REFERENCES activos(id) ON DELETE CASCADE)''')
     
     # Tabla de Paros con ON DELETE CASCADE
@@ -138,15 +138,16 @@ def generar_id_automatico(tipo_activo):
     prefijo = prefijos.get(tipo_activo, "GEN")
     
     conn = get_connection()
-    df = pd.read_sql(f"SELECT id FROM activos WHERE id LIKE '{prefijo}-%'", conn)
+    # Consulta parametrizada para evitar inyección
+    df = pd.read_sql("SELECT id FROM activos WHERE id LIKE ?", conn, params=(f"{prefijo}-%",))
     conn.close()
     
     if df.empty:
         return f"{prefijo}-001"
     else:
-        # Extraer el número, encontrar el máximo y sumar 1
         nums = df['id'].str.extract(r'-(\d+)')[0].dropna().astype(int)
-        if nums.empty: return f"{prefijo}-001"
+        if nums.empty:
+            return f"{prefijo}-001"
         return f"{prefijo}-{(nums.max() + 1):03d}"
 
 def guardar_archivo(archivo_subido, prefijo=""):
@@ -166,21 +167,26 @@ def calcular_indicadores(equipo_id=None):
     query_paros = "SELECT * FROM paros"
     
     if equipo_id:
-        query_trabajos += f" WHERE equipo_id = '{equipo_id}'"
-        query_paros += f" WHERE equipo_id = '{equipo_id}'"
-        
-    df_trabajos = pd.read_sql(query_trabajos, conn)
-    df_paros = pd.read_sql(query_paros, conn)
+        # Uso de parámetros para evitar inyección
+        df_trabajos = pd.read_sql(query_trabajos + " WHERE equipo_id = ?", conn, params=(equipo_id,))
+        df_paros = pd.read_sql(query_paros + " WHERE equipo_id = ?", conn, params=(equipo_id,))
+    else:
+        df_trabajos = pd.read_sql(query_trabajos, conn)
+        df_paros = pd.read_sql(query_paros, conn)
     conn.close()
 
     if df_trabajos.empty and df_paros.empty:
-        return (None, None, None)  # ahora devolvemos una tupla de tres elementos
+        return (None, None, None)
 
-    # Conversión a datetime
-    df_trabajos['fecha_inicio'] = pd.to_datetime(df_trabajos['fecha_inicio'])
-    df_trabajos['fecha_fin'] = pd.to_datetime(df_trabajos['fecha_fin'])
-    df_paros['inicio_paro'] = pd.to_datetime(df_paros['inicio_paro'])
-    df_paros['fin_paro'] = pd.to_datetime(df_paros['fin_paro'])
+    # Conversión a datetime con errors='coerce' y eliminación de NaT
+    df_trabajos['fecha_inicio'] = pd.to_datetime(df_trabajos['fecha_inicio'], errors='coerce')
+    df_trabajos['fecha_fin'] = pd.to_datetime(df_trabajos['fecha_fin'], errors='coerce')
+    df_paros['inicio_paro'] = pd.to_datetime(df_paros['inicio_paro'], errors='coerce')
+    df_paros['fin_paro'] = pd.to_datetime(df_paros['fin_paro'], errors='coerce')
+
+    # Eliminar filas con fechas nulas
+    df_trabajos = df_trabajos.dropna(subset=['fecha_inicio', 'fecha_fin'])
+    df_paros = df_paros.dropna(subset=['inicio_paro', 'fin_paro'])
 
     # Tiempo Total de Paro (Horas)
     total_paro = 0
@@ -206,8 +212,7 @@ def calcular_indicadores(equipo_id=None):
     if tiempo_total_estudio == 0:
         tiempo_total_estudio = 1  # evitar división por cero
 
-
-    # Cálculo de indicadores #
+    # Cálculo de indicadores
     mttr = total_paro / num_fallas if num_fallas > 0 else 0
     mtbf = (tiempo_total_estudio - total_paro) / num_fallas if num_fallas > 0 else tiempo_total_estudio
     disponibilidad = ((tiempo_total_estudio - total_paro) / tiempo_total_estudio) * 100
@@ -231,7 +236,6 @@ init_db()
 # SIDEBAR
 # =========================================================
 with st.sidebar:
-    # Intentamos cargar el logo desde la ruta proporcionada
     ruta_logo = os.path.join(os.path.dirname(__file__), "logo_tec.png")
     if os.path.exists(ruta_logo):
         st.image(ruta_logo, use_container_width=True)
@@ -255,13 +259,11 @@ if menu == "📊 Dashboard":
     conn = get_connection()
     df_activos = pd.read_sql("SELECT * FROM activos", conn)
 
-    # --- NUEVO: Cálculo Global de Planta (Requisito 'f') ---
     df_trab_global = pd.read_sql("SELECT costo_repuestos FROM trabajos", conn)
     costo_global = df_trab_global['costo_repuestos'].sum() if not df_trab_global.empty else 0
     
     st.info(f"💰 **Costo Total de Mantenimiento (Global de Planta):** ${costo_global:,.2f}")
     st.markdown("---")
-    # -------------------------------------------------------
 
     activos = pd.read_sql("SELECT id, nombre FROM activos", conn)
     conn.close()
@@ -275,17 +277,14 @@ if menu == "📊 Dashboard":
             selected_option = st.selectbox("Seleccione un equipo:", df_activos['id'] + " - " + df_activos['nombre'])
             eid = selected_option.split(" - ")[0]
             
-        # 🌟 NUEVO: Cambio de Estado Operativo rápido
         with col_estado:
             st.write("Estado Operativo:")
             estado_actual = df_activos.loc[df_activos['id'] == eid, 'estado'].values[0]
             
-            # Selector de estado
             nuevo_estado = st.radio("Modificar", ["Activo", "En Falla"], 
                                     index=0 if estado_actual == "Activo" else 1, horizontal=True, label_visibility="collapsed")
             
             if nuevo_estado != estado_actual:
-                # 2. Abrimos una conexión NUEVA exclusiva para actualizar
                 conn_upd = get_connection()
                 conn_upd.execute("UPDATE activos SET estado = ? WHERE id = ?", (nuevo_estado, eid))
                 conn_upd.commit()
@@ -297,52 +296,36 @@ if menu == "📊 Dashboard":
             else:
                 st.error("🔴 Equipo Detenido (En Falla)")
                 
-        # 🌟 DOCUMENTOS DEL ACTIVO
         with col_manual:
             st.write("Documentación Técnica")
-        
             archivos_equipo = []
-        
-            # Buscar archivos relacionados con el equipo
             carpeta_uploads = "uploads"
         
             if os.path.exists(carpeta_uploads):
-        
                 for archivo in os.listdir(carpeta_uploads):
-        
-                    # Archivos OT del equipo
-                    if f"OT_{eid}" in archivo:
-                        archivos_equipo.append(archivo)
-        
-                    # Manuales del equipo
-                    elif f"MANUAL_{eid}" in archivo:
+                    if f"OT_{eid}" in archivo or f"MANUAL_{eid}" in archivo:
                         archivos_equipo.append(archivo)
         
             if archivos_equipo:
-        
                 for archivo in archivos_equipo:
-        
                     ruta_archivo = os.path.join(carpeta_uploads, archivo)
-        
                     with open(ruta_archivo, "rb") as file:
-                        st.download_button(
-                            label=f"📄 {archivo}",
-                            data=file,
-                            file_name=archivo,
-                            mime="application/octet-stream",
-                            key=archivo
-                        )
-        
+                        file_bytes = file.read()  # Leer completamente antes de cerrar
+                    st.download_button(
+                        label=f"📄 {archivo}",
+                        data=file_bytes,
+                        file_name=archivo,
+                        mime="application/octet-stream",
+                        key=archivo
+                    )
             else:
                 st.info("No hay documentos asociados a este activo.")
 
-        conn.close()
         st.markdown("---")
         
-        indicadores, df_trab, df_paros = calcular_indicadores(eid)  # ahora devuelve tres
+        indicadores, df_trab, df_paros = calcular_indicadores(eid)
         
-        if indicadores is not None:   # si hay datos, el diccionario no es None
-            # Métricas con las claves correctas
+        if indicadores is not None:
             col1, col2, col3 = st.columns(3)
             col1.metric("MTBF (H)", f"{indicadores['MTBF (H)']} h", help="Tiempo medio entre fallos")
             col2.metric("MTTR (H)", f"{indicadores['MTTR (H)']} h", help="Tiempo medio de reparación")
@@ -353,27 +336,21 @@ if menu == "📊 Dashboard":
             col5.metric("Total Paro", f"{indicadores['Horas Paro']} h")
             col6.metric("Costo Mantenimiento (Equipo)", f"${indicadores['Costo Total ($)']}")
             
-            # INTERPRETACIÓN TÉCNICA
             st.markdown("---")
             st.subheader("🧠 Interpretación Técnica")
 
-            if indicadores['Disponibilidad (%)'] < 85:
+            disp = indicadores['Disponibilidad (%)']
+            if disp < 85:
                 st.error("⚠️ Equipo crítico: baja disponibilidad operacional")
-                st.subheader(f"{indicadores['Disponibilidad (%)']} %")
-
-            elif indicadores['Disponibilidad (%)'] < 95:
+            elif disp < 95:
                 st.warning("⚠️ Disponibilidad aceptable pero mejorable")
-                st.subheader(f"{indicadores['Disponibilidad (%)']} %")
-
             else:
                 st.success("✅ Excelente disponibilidad")
-                st.subheader(f"{indicadores['Disponibilidad (%)']} %")
+            st.subheader(f"{disp} %")
 
             if indicadores['MTBF (H)'] < 20:
                 st.warning("⚠️ Alta frecuencia de fallos. Se recomienda fortalecer mantenimiento preventivo.")
 
-
-            # --- GRÁFICO INTERACTIVO ---
             st.markdown("---")
             st.subheader("📊 Comparativa de Tiempos de Mantenimiento")
             
@@ -404,40 +381,26 @@ if menu == "📊 Dashboard":
 elif menu == "📋 Registro Activos":
     st.header("Registro de Nuevos Equipos")
 
-    # 🌟 NUEVO: Sacamos el tipo de equipo fuera del form para que Streamlit pueda actualizar el ID dinámicamente
     tipo = st.selectbox("1. Seleccione Tipo de Activo", ["Motor", "Bomba", "Compresor", "Cinta Transportadora", "Otro"])
-    
-    # Generador automático
     id_sugerido = generar_id_automatico(tipo)
 
     with st.form("form_activos"):
         st.write("2. Complete los datos del equipo")
         c1, c2 = st.columns(2)
-        # Se rellena automáticamente con el ID sugerido
         aid = c1.text_input("Código/ID Equipo", value=id_sugerido, help="Puede dejar el generado automáticamente o editarlo.")
         nombre = c2.text_input("Nombre del Equipo", placeholder="Ej: Bomba de Agua Principal")
         area = c1.text_input("Área o Proceso")
         estado = c2.selectbox("Estado Inicial", ["Activo", "Fuera de servicio"])
-        manual_equipo = st.file_uploader(
-            "Manual / Plano del equipo",
-            type=['pdf', 'png', 'jpg']
-        )
+        manual_equipo = st.file_uploader("Manual / Plano del equipo", type=['pdf', 'png', 'jpg'])
 
-        # ==========================================
-        # BOTÓN GUARDAR
-        # ==========================================
         if st.form_submit_button("✅ Guardar Activo"):
             if aid and nombre:
                 conn = get_connection()
                 try:
                     conn.execute("INSERT INTO activos VALUES (?,?,?,?,?)", (aid, nombre, area, tipo, estado))
                     conn.commit()
-                    # 🌟 GUARDAR ARCHIVO DEL MANUAL
                     if manual_equipo:
-                        guardar_archivo(
-                            manual_equipo,
-                            prefijo=f"MANUAL_{aid}"
-                        )
+                        guardar_archivo(manual_equipo, prefijo=f"MANUAL_{aid}")
                     st.success(f"Equipo {nombre} ({aid}) registrado correctamente.")
                     st.balloons()
                 except sqlite3.Error:
@@ -448,11 +411,9 @@ elif menu == "📋 Registro Activos":
                 st.warning("Por favor complete los campos obligatorios (ID y Nombre).")
     
     st.markdown("---")
-
     conn = get_connection()
     df = pd.read_sql("SELECT * FROM activos", conn)
     conn.close()
-
     st.dataframe(df, use_container_width=True)
 
 # =========================================================
@@ -472,89 +433,88 @@ elif menu == "🔧 Mantenimiento":
     else:
         with tab1:
             with st.form("form_trabajo"):
-                # 1. Selección del equipo
                 tequipo = st.selectbox("Equipo", lista_opciones).split(" - ")[0]
-        
-                # 2. Tipo de mantenimiento
                 ttipo = st.selectbox("Tipo Mantenimiento", ["Preventivo", "Correctivo", "Predictivo"])
         
-                # 3. Fecha y hora de inicio (con valores por defecto actuales)
                 col_f1, col_h1 = st.columns(2)
                 with col_f1:
                     fecha_ini = st.date_input("Fecha inicio", datetime.now().date())
                 with col_h1:
                     hora_ini = st.time_input("Hora inicio", datetime.now().time())
         
-                # 4. Fecha y hora de fin (mismos valores por defecto, pero el usuario los modificará)
                 col_f2, col_h2 = st.columns(2)
                 with col_f2:
                     fecha_fin = st.date_input("Fecha fin", datetime.now().date())
                 with col_h2:
                     hora_fin = st.time_input("Hora fin", datetime.now().time())
         
-                # Combinar en objetos datetime
                 tini = datetime.combine(fecha_ini, hora_ini)
                 tfin = datetime.combine(fecha_fin, hora_fin)
         
-                # Validación
+                horas_duracion = None  # Inicialización para evitar NameError
                 if tfin < tini:
                     st.error("❌ La fecha/hora de fin no puede ser anterior a la de inicio.")
-                    diferencia = None
                 else:
                     diferencia = tfin - tini
                     horas_duracion = diferencia.total_seconds() / 3600.0
                     st.success(f"✅ Duración de la intervención: {horas_duracion:.2f} horas")
         
-                # Resto de campos
                 tdesc = st.text_area("Descripción de la tarea")
                 col_t3, col_t4 = st.columns(2)
                 tpers = col_t3.text_input("Técnico Responsable")
                 tcosto = col_t4.number_input("Costo Mantenimiento ($)", min_value=0.0, value=0.0)
-        
-                # Archivo adjunto
                 archivo_reporte = st.file_uploader("Adjuntar Reporte / Orden de Trabajo (Opcional)", type=['pdf', 'docx', 'jpg'])
         
                 if st.form_submit_button("Registrar Mantenimiento"):
-                    nombre_archivo = guardar_archivo(archivo_reporte, prefijo=f"OT_{tequipo}")
-                    conn = get_connection()
-                    # Guardamos la duración en horas (como número real) en la columna tiempo_inter
-                    # Nota: la columna tiempo_inter debe ser REAL (o FLOAT). Si es TEXT, conviértela.
-                    conn.execute("""
-                        INSERT INTO trabajos 
-                        (equipo_id, tipo_mant, fecha_inicio, fecha_fin, descripcion, personal, costo_repuestos, tiempo_inter, archivo_adjunto)
-                        VALUES (?,?,?,?,?,?,?,?,?)
-                    """, (tequipo, ttipo, tini, tfin, tdesc, tpers, tcosto, horas_duracion if diferencia else None, nombre_archivo))
-                    conn.commit()
-                    conn.close()
-                    st.success("Orden de trabajo guardada exitosamente.")
-
+                    if tfin < tini:
+                        st.error("No se puede guardar: la fecha de fin es anterior a la de inicio.")
+                    else:
+                        nombre_archivo = guardar_archivo(archivo_reporte, prefijo=f"OT_{tequipo}")
+                        conn = get_connection()
+                        conn.execute("""
+                            INSERT INTO trabajos 
+                            (equipo_id, tipo_mant, fecha_inicio, fecha_fin, descripcion, personal, costo_repuestos, tiempo_inter, archivo_adjunto)
+                            VALUES (?,?,?,?,?,?,?,?,?)
+                        """, (tequipo, ttipo, tini, tfin, tdesc, tpers, tcosto, horas_duracion, nombre_archivo))
+                        conn.commit()
+                        conn.close()
+                        st.success("Orden de trabajo guardada exitosamente.")
         with tab2:
+            # Separación de fecha y hora también para paros (evita errores de hora no modificada)
             with st.form("form_paro"):
-                pequipo_full = st.selectbox("Equipo en Paro", lista_activos)
+                pequipo_full = st.selectbox("Equipo en Paro", lista_opciones)
                 pequipo = pequipo_full.split(" - ")[0]
-                c_p1, c_p2 = st.columns(2)
-                pini = c_p1.datetime_input("Inicio del Paro", datetime.now())
-                pfin = c_p2.datetime_input("Fin del Paro", datetime.now())
+                
+                col_p1, col_p2 = st.columns(2)
+                with col_p1:
+                    fecha_ini_paro = st.date_input("Fecha inicio paro", datetime.now().date())
+                    hora_ini_paro = st.time_input("Hora inicio paro", datetime.now().time())
+                with col_p2:
+                    fecha_fin_paro = st.date_input("Fecha fin paro", datetime.now().date())
+                    hora_fin_paro = st.time_input("Hora fin paro", datetime.now().time())
+                
+                pini = datetime.combine(fecha_ini_paro, hora_ini_paro)
+                pfin = datetime.combine(fecha_fin_paro, hora_fin_paro)
                 
                 if pfin < pini:
-                    st.error("¡Error! La fecha de fin no puede ser anterior a la de inicio.")
+                    st.error("¡Error! La fecha/hora de fin no puede ser anterior a la de inicio.")
                     diferencia_paro = None
                 else:
                     diferencia_paro = pfin - pini
                     st.write(f"La duración total del paro es: {diferencia_paro}")
                 
-                pint = str(diferencia_paro) if diferencia_paro else None
-
-                
                 pcausa = st.text_input("Causa Raíz / Motivo")
                 
                 if st.form_submit_button("Reportar Paro"):
-                    conn = get_connection()
-                    conn.execute("INSERT INTO paros (equipo_id, inicio_paro, fin_paro, causa) VALUES (?,?,?,?)",
-                                (pequipo, pini, pfin, pcausa))
-                    conn.commit()
-                    conn.close()
-                    st.warning(f"Paro registrado para el equipo {pequipo}.")
+                    if pfin >= pini:
+                        conn = get_connection()
+                        conn.execute("INSERT INTO paros (equipo_id, inicio_paro, fin_paro, causa) VALUES (?,?,?,?)",
+                                    (pequipo, pini, pfin, pcausa))
+                        conn.commit()
+                        conn.close()
+                        st.warning(f"Paro registrado para el equipo {pequipo}.")
+                    else:
+                        st.error("No se puede registrar el paro porque la fecha de fin es anterior al inicio.")
 
 # =========================================================
 # REPUESTOS
@@ -618,13 +578,12 @@ elif menu == "📦 Repuestos":
                 
                 if st.form_submit_button("Registrar Consumo y Descontar Stock"):
                     cursor = conn.cursor()
-                    # Insertar el detalle del repuesto consumido
                     cursor.execute("INSERT INTO detalle_repuestos (trabajo_id, repuesto_id, cantidad, costo_total) VALUES (?,?,?,?)",
                                    (trabajo_id, repuesto_id, cantidad_uso, costo_total_calculado))
-                    # Descontar el stock automáticamente
                     cursor.execute("UPDATE repuestos SET stock = stock - ? WHERE id = ?", (cantidad_uso, repuesto_id))
-                    # Sumar el costo al costo total de la orden de trabajo
-                    cursor.execute("UPDATE trabajos SET costo_repuestos = costo_repuestos + ? WHERE id = ?", (costo_total_calculado, trabajo_id))
+                    # Usar IFNULL para evitar que costo_repuestos NULL cause problemas
+                    cursor.execute("UPDATE trabajos SET costo_repuestos = IFNULL(costo_repuestos, 0) + ? WHERE id = ?", 
+                                   (costo_total_calculado, trabajo_id))
                     conn.commit()
                     st.success("Inventario actualizado y costo asignado a la orden de trabajo exitosamente.")
                     
@@ -658,138 +617,89 @@ elif menu == "🔍 Base de datos":
         st.subheader("Historial de Mantenimientos")
         df_trabajos_hist = pd.read_sql("SELECT * FROM trabajos", conn)
         
-        # --- NUEVO: FILTRADO OBLIGATORIO ---
+        # Inicialización de filtros fuera del condicional
+        filtro_eq = []
+        filtro_tipo = []
+        
         if not df_trabajos_hist.empty:
+            df_trabajos_hist['fecha_inicio'] = pd.to_datetime(df_trabajos_hist['fecha_inicio'], errors='coerce')
+            df_trabajos_hist = df_trabajos_hist.dropna(subset=['fecha_inicio'])
+    
             c_f1, c_f2 = st.columns(2)
             filtro_eq = c_f1.multiselect("Filtrar por Equipo", df_trabajos_hist['equipo_id'].unique())
             filtro_tipo = c_f2.multiselect("Filtrar por Tipo de Mantenimiento", df_trabajos_hist['tipo_mant'].unique())
-            
+    
             if filtro_eq:
                 df_trabajos_hist = df_trabajos_hist[df_trabajos_hist['equipo_id'].isin(filtro_eq)]
             if filtro_tipo:
                 df_trabajos_hist = df_trabajos_hist[df_trabajos_hist['tipo_mant'].isin(filtro_tipo)]
-
+    
             c_f3, c_f4 = st.columns(2)
-            fecha_inicio = c_f3.date_input("Fecha inicio filtro")
-            fecha_fin = c_f4.date_input("Fecha final filtro")
-
-            df_trabajos_hist['fecha_inicio'] = pd.to_datetime(
-                df_trabajos_hist['fecha_inicio']
-            )
-            
+            fecha_desde = c_f3.date_input("Fecha inicio filtro", value=datetime.now().date())
+            fecha_hasta = c_f4.date_input("Fecha final filtro", value=datetime.now().date())
+    
+            fecha_desde = pd.Timestamp(fecha_desde)
+            fecha_hasta = pd.Timestamp(fecha_hasta) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+    
             df_trabajos_hist = df_trabajos_hist[
-                (df_trabajos_hist['fecha_inicio'].dt.date >= fecha_inicio) &
-                (df_trabajos_hist['fecha_inicio'].dt.date <= fecha_fin)
+                (df_trabajos_hist['fecha_inicio'] >= fecha_desde) &
+                (df_trabajos_hist['fecha_inicio'] <= fecha_hasta)
             ]
-        
+    
         st.dataframe(df_trabajos_hist, use_container_width=True)
 
         st.subheader("Archivos Adjuntos")
         for _, row in df_trabajos_hist.iterrows():
-        
-                archivo = row.get("archivo_adjunto")
-        
-                if archivo:
-        
-                    ruta = os.path.join("uploads", archivo)
-        
-                    if os.path.exists(ruta):
-        
-                        with open(ruta, "rb") as f:
-                            st.download_button(
-                                label=f"📄 OT #{row['id']} - {archivo}",
-                                data=f,
-                                file_name=archivo,
-                                key=f"hist_{row['id']}"
-                            )
+            archivo = row.get("archivo_adjunto")
+            if archivo:
+                ruta = os.path.join("uploads", archivo)
+                if os.path.exists(ruta):
+                    with open(ruta, "rb") as f:
+                        file_bytes = f.read()
+                    st.download_button(
+                        label=f"📄 OT #{row['id']} - {archivo}",
+                        data=file_bytes,
+                        file_name=archivo,
+                        key=f"hist_{row['id']}"
+                    )
         
         st.subheader("Historial de Paros")
         df_paros_hist = pd.read_sql("SELECT * FROM paros", conn)
         
-        # Sincronizamos el filtro de equipo con la tabla de paros
-        if not df_paros_hist.empty and 'filtro_eq' in locals() and filtro_eq:
-             df_paros_hist = df_paros_hist[df_paros_hist['equipo_id'].isin(filtro_eq)]
+        if not df_paros_hist.empty and filtro_eq:
+            df_paros_hist = df_paros_hist[df_paros_hist['equipo_id'].isin(filtro_eq)]
              
         st.dataframe(df_paros_hist, use_container_width=True)
         
     with t_rept:
-        st.dataframe(pd.read_sql("SELECT id, descripcion, stock, costo_unitario FROM repuestos", conn),use_container_width=True)
+        st.dataframe(pd.read_sql("SELECT id, descripcion, stock, costo_unitario FROM repuestos", conn), use_container_width=True)
     
     with t_adm:
         st.subheader("Zona de Peligro")
-    
         col_activo, col_repuesto = st.columns(2)
     
-        # =========================
-        # BORRAR ACTIVOS
-        # =========================
         with col_activo:
-            lista_borrar_equipo = pd.read_sql(
-                "SELECT id FROM activos", conn
-            )['id'].tolist()
-    
+            lista_borrar_equipo = pd.read_sql("SELECT id FROM activos", conn)['id'].tolist()
             if lista_borrar_equipo:
-                equipo_a_borrar = st.selectbox(
-                    "Seleccione ID de equipo a eliminar",
-                    lista_borrar_equipo,
-                    key="sel_borrar_activo"
-                )
-    
-                st.warning(
-                    f"Borrar el activo {equipo_a_borrar} eliminará también todo su historial."
-                )
-    
-                if st.button(
-                    "Confirmar eliminación de activo",
-                    key="btn_borrar_activo"
-                ):
+                equipo_a_borrar = st.selectbox("Seleccione ID de equipo a eliminar", lista_borrar_equipo, key="sel_borrar_activo")
+                st.warning(f"Borrar el activo {equipo_a_borrar} eliminará también todo su historial.")
+                if st.button("Confirmar eliminación de activo", key="btn_borrar_activo"):
                     cursor = conn.cursor()
-                    cursor.execute(
-                        "DELETE FROM activos WHERE id = ?",
-                        (equipo_a_borrar,)
-                    )
+                    cursor.execute("DELETE FROM activos WHERE id = ?", (equipo_a_borrar,))
                     conn.commit()
-    
                     st.success("Activo eliminado.")
                     st.rerun()
     
-        # =========================
-        # BORRAR REPUESTOS
-        # =========================
         with col_repuesto:
-            lista_borrar_repuesto = pd.read_sql(
-                "SELECT id FROM repuestos", conn
-            )['id'].tolist()
-    
+            lista_borrar_repuesto = pd.read_sql("SELECT id FROM repuestos", conn)['id'].tolist()
             if lista_borrar_repuesto:
-                repuesto_a_borrar = st.selectbox(
-                    "Seleccione ID de repuesto a eliminar",
-                    lista_borrar_repuesto,
-                    key="sel_borrar_repuesto"
-                )
-    
-                st.warning(
-                    f"Borrar el repuesto {repuesto_a_borrar} eliminará su historial."
-                )
-    
-                if st.button(
-                    "Confirmar eliminación de repuesto",
-                    key="btn_borrar_repuesto"
-                ):
+                repuesto_a_borrar = st.selectbox("Seleccione ID de repuesto a eliminar", lista_borrar_repuesto, key="sel_borrar_repuesto")
+                st.warning(f"Borrar el repuesto {repuesto_a_borrar} eliminará su historial.")
+                if st.button("Confirmar eliminación de repuesto", key="btn_borrar_repuesto"):
                     cursor = conn.cursor()
-    
-                    cursor.execute(
-                        "DELETE FROM detalle_repuestos WHERE repuesto_id = ?",
-                        (repuesto_a_borrar,)
-                    )
-    
-                    cursor.execute(
-                        "DELETE FROM repuestos WHERE id = ?",
-                        (repuesto_a_borrar,)
-                    )
-    
+                    cursor.execute("DELETE FROM detalle_repuestos WHERE repuesto_id = ?", (repuesto_a_borrar,))
+                    cursor.execute("DELETE FROM repuestos WHERE id = ?", (repuesto_a_borrar,))
                     conn.commit()
-    
                     st.success("Repuesto eliminado.")
                     st.rerun()
     conn.close()
